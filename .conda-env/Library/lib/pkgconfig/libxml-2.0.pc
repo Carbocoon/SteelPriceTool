@@ -1,0 +1,11 @@
+prefix=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library 
+exec_prefix=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library 
+libdir=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library/lib 
+includedir=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library/include 
+modules=0 
+Name: libXML 
+Version: 2.13.9 
+Description: libXML library version2. 
+Requires: 
+Libs: -LD:/temp_documents/公司/SteelPriceTool/.conda-env/Library/lib -lxml2 -liconv -lz 
+Cflags: -ID:/temp_documents/公司/SteelPriceTool/.conda-env/Library/include/libxml2 -ID:/temp_documents/公司/SteelPriceTool/.conda-env/Library/include 

@@ -1,0 +1,11 @@
+prefix=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library
+exec_prefix=${prefix}
+libdir=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library/lib
+includedir=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library/include
+
+Name: abseil_dll
+Description: Abseil DLL library
+URL: https://abseil.io/
+Version: 20250127
+Libs: -L${libdir} -labseil_dll 
+Cflags: -I${includedir}

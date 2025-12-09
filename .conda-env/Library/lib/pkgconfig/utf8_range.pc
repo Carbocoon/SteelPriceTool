@@ -1,0 +1,11 @@
+prefix=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library
+exec_prefix=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library
+libdir=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library/lib
+includedir=D:/temp_documents/公司/SteelPriceTool/.conda-env/Library/include
+
+Name: UTF8 Range
+Description: Google's UTF8 Library
+Version: 1.0
+Requires: absl_strings
+Libs: -L${libdir} -lutf8_validity -lutf8_range 
+Cflags: -I${includedir}
