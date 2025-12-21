@@ -320,11 +320,20 @@ class ProductDataProcessor:
                 spec1 = thickness
                 spec2 = spec_str
             
+            # 处理管材型号：只保留xx寸/xx分
+            model_val = spec_str
+            if p_type == '管材' or '管' in full_product_name:
+                 if '*' in spec_str:
+                     parts = spec_str.split('*')
+                     # Check if first part has '寸' or '分'
+                     if '寸' in parts[0] or '分' in parts[0]:
+                         model_val = parts[0]
+
             # 构建完整的模板记录
             record = {
                 '类型': file_info['product_type'] or '',
                 '品名': full_product_name,
-                '型号': spec_str,  # 型号直接使用原始规格字符串
+                '型号': model_val,  # 型号使用处理后的值
                 '规格1': spec1,
                 '规格2': spec2,
                 '规格3': spec3,

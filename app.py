@@ -162,6 +162,61 @@ def main():
                         st.write("**材质:**", file_info.get('material', '未识别'))
                         st.write("**执行标准:**", file_info.get('standard', '未识别'))
                 
+                # 规格映射说明与批量填充
+                p_type = file_info.get('product_type', '')
+                mapping_info = {
+                    '方矩管': {'规格1': '壁厚', '规格2': '长度', '规格3': '支重', '规格4': '支/件', '规格5': '预留'},
+                    '板材': {'规格1': '厚度', '规格2': '宽度', '规格3': '长度', '规格4': 'kg/块', '规格5': '预留'},
+                    '型材': {'规格1': '支重', '规格2': '长度', '规格3': '负差', '规格4': '支/件', '规格5': '预留'},
+                    '管材': {'规格1': '壁厚', '规格2': '长度', '规格3': '支重', '规格4': '支/件', '规格5': '预留'},
+                    '矿用品': {'规格1': '米重', '规格2': '长度', '规格3': '支/件', '规格4': '预留', '规格5': '预留'},
+                    '棒材': {'规格1': '长度', '规格2': '米重', '规格3': '支/件', '规格4': '预留', '规格5': '预留'},
+                    '彩涂卷': {'规格1': '厚度', '规格2': '宽度', '规格3': '长度', '规格4': 'kg/块', '规格5': '预留'}
+                }
+                
+                current_mapping = mapping_info.get(p_type, {})
+                
+                if current_mapping:
+                    with st.expander("📝 规格映射与批量填充", expanded=True):
+                        st.info(f"当前产品类型【{p_type}】的规格映射关系如下：")
+                        
+                        # 展示映射关系并提供输入框
+                        cols = st.columns(5)
+                        fill_values = {}
+                        
+                        for i in range(1, 6):
+                            spec_key = f'规格{i}'
+                            col_name = current_mapping.get(spec_key, '未知')
+                            
+                            with cols[i-1]:
+                                st.markdown(f"**{spec_key} ({col_name})**")
+                                # 检查当前列是否为空（或大部分为空）
+                                is_empty = False
+                                if spec_key in df.columns:
+                                    # 简单的检查：如果空值比例超过80%，则认为是空列
+                                    empty_ratio = df[spec_key].replace('', pd.NA).isna().mean()
+                                    if empty_ratio > 0.8:
+                                        is_empty = True
+                                
+                                if is_empty:
+                                    val = st.text_input(f"填充{col_name}", key=f"fill_{selected_file}_{spec_key}", placeholder="输入值以填充")
+                                    if val:
+                                        fill_values[spec_key] = val
+                                else:
+                                    st.caption("已识别数据")
+                        
+                        # 应用填充
+                        if fill_values:
+                            if st.button("应用批量填充"):
+                                for key, val in fill_values.items():
+                                    df[key] = df[key].replace('', val).fillna(val)
+                                    # 如果全是空字符串，replace可能不起作用，强制赋值
+                                    if df[key].eq('').all():
+                                        df[key] = val
+                                st.session_state.results[selected_file] = df
+                                st.success("填充完成！")
+                                st.rerun()
+
                 # 显示数据预览
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 
