@@ -42,6 +42,7 @@ class ZhengdaGalvanizedStrategy(ExtractionStrategy):
         records = []
         column_headers = self.get_column_headers(df, header_row)
         last_specs = {}
+        last_counts = {}
 
         for row_idx in range(data_start_row, len(df)):
             row = df.iloc[row_idx]
@@ -49,11 +50,18 @@ class ZhengdaGalvanizedStrategy(ExtractionStrategy):
 
             # Zhengda format: Spec(0), Price(1), Count(2) - repeated
             for start_col in range(0, len(row) - 2, 3):
-                spec_col, price_col = start_col, start_col + 1
+                spec_col, price_col, count_col = start_col, start_col + 1, start_col + 2
                 if price_col >= len(row): continue
 
                 spec_val = str(row.iloc[spec_col]).strip() if spec_col < len(row) and pd.notna(row.iloc[spec_col]) else ""
                 price = row.iloc[price_col] if price_col < len(row) and pd.notna(row.iloc[price_col]) else None
+                
+                # Extract count
+                count_val = row.iloc[count_col] if count_col < len(row) and pd.notna(row.iloc[count_col]) else None
+                if count_val is not None and str(count_val).strip():
+                     last_counts[start_col] = count_val
+                
+                current_count = last_counts.get(start_col, '')
 
                 if not spec_val or not price: continue
 
@@ -78,7 +86,8 @@ class ZhengdaGalvanizedStrategy(ExtractionStrategy):
                 records.append({
                     '规格': full_spec,
                     '厚度': thickness_range,
-                    '价格': float(price) if isinstance(price, (int, float, np.integer, np.floating)) else 0
+                    '价格': float(price) if isinstance(price, (int, float, np.integer, np.floating)) else 0,
+                    '支数': current_count
                 })
         
         return records, column_headers
