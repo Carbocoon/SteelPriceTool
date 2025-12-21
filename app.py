@@ -1,0 +1,302 @@
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+from data_processor import ProductDataProcessor, BatchProcessor
+
+def main():
+    st.set_page_config(
+        page_title="产品数据智能提取工具",
+        page_icon="🤖",
+        layout="wide"
+    )
+    
+    st.title("🤖 产品数据智能提取工具")
+    
+    # 初始化处理器
+    if 'processor' not in st.session_state:
+        st.session_state.processor = ProductDataProcessor()
+    if 'results' not in st.session_state:
+        st.session_state.results = {}
+    if 'file_infos' not in st.session_state:
+        st.session_state.file_infos = {}
+    if 'step' not in st.session_state:
+        st.session_state.step = 1
+    
+    # 侧边栏配置
+    with st.sidebar:
+        st.header("🛠️ 工具箱")
+        
+        # 厂家选择
+        manufacturer = st.selectbox(
+            "🏭 选择厂家",
+            ["自动识别", "正大制管", "其他厂家(待添加)"],
+            help="选择特定厂家可提高识别准确率"
+        )
+        
+        # 重置按钮
+        if st.button("🔄 重置所有数据", use_container_width=True):
+            st.session_state.results = {}
+            st.session_state.file_infos = {}
+            st.session_state.step = 1
+            st.rerun()
+            
+        st.markdown("---")
+        
+        # 使用说明
+        with st.expander("📖 使用说明", expanded=True):
+            st.markdown("""
+            **支持格式:**
+            - **支持规格继承、多列布局**
+            - **普通表格** (标准三列/四列格式)
+            - **复杂表头** (多规格同格: 40\*40 50\*30)
+            
+            **功能亮点:**
+            - 🏭 **厂家指定**: 可强制指定厂家以提高识别率
+            - 🔄 **智能推断**: 自动补全缺失的品名/材质
+            - 📏 **单位统一**: 长度转mm，厚度保留一位小数
+            
+            **操作流程:**
+            1. **上传**: 支持批量拖拽上传Excel文件
+            2. **预览**: 检查识别结果，确认无误
+            3. **下载**: 导出清洗后的标准数据
+            """)
+            
+        st.markdown("---")
+        
+        # 高级设置
+        with st.expander("⚙️ 高级设置"):
+            # 调试模式
+            st.session_state.debug_mode = st.checkbox("调试模式", value=False)
+    
+    # 主界面 - 分步向导布局
+    
+    # 步骤指示器
+    steps = ["1. 上传文件", "2. 结果预览", "3. 下载结果"]
+    current_step_idx = st.session_state.step - 1
+    
+    # 简单的进度条显示
+    progress_cols = st.columns(3)
+    for i, step_name in enumerate(steps):
+        if i == current_step_idx:
+            progress_cols[i].markdown(f"### 🔵 {step_name}")
+        elif i < current_step_idx:
+            progress_cols[i].markdown(f"### ✅ {step_name}")
+        else:
+            progress_cols[i].markdown(f"### ⚪ {step_name}")
+    
+    st.markdown("---")
+
+    # 步骤 1: 上传文件
+    if st.session_state.step == 1:
+        st.header("📤 上传文件")
+        
+        # 批量上传文件
+        uploaded_files = st.file_uploader(
+            "选择供应商价格表文件",
+            type=['xls', 'xlsx'],
+            accept_multiple_files=True,
+            help="支持多个Excel文件同时上传，系统将自动识别内容"
+        )
+        
+        if uploaded_files:
+            if len(uploaded_files) > 5:
+                st.error(f"⚠️ 一次最多只能上传 5 个文件，您上传了 {len(uploaded_files)} 个。请重新选择。")
+            else:
+                st.success(f"已选择 {len(uploaded_files)} 个文件")
+                
+                # 显示文件列表
+                with st.expander("📁 查看已选文件列表"):
+                    for file in uploaded_files:
+                        st.write(f"**{file.name}** ({file.size/1024:.1f} KB)")
+                
+                # 处理按钮
+                if st.button("🚀 开始智能提取", type="primary", use_container_width=True):
+                    # 使用 status 容器显示进度
+                    with st.status("正在处理文件...", expanded=True) as status:
+                        # 创建批处理器
+                        batch_processor = BatchProcessor()
+                        
+                        st.write("正在初始化处理器...")
+                        # 处理所有文件
+                        results, file_infos = batch_processor.process_multiple_files(
+                            uploaded_files,
+                            manufacturer=manufacturer
+                        )
+                        
+                        # 保存结果到session state
+                        st.session_state.results = results
+                        st.session_state.file_infos = file_infos
+                        
+                        if results:
+                            status.update(label="✅ 处理完成！", state="complete", expanded=False)
+                            st.success(f"成功处理 {len(results)} 个文件")
+                            st.session_state.step = 2
+                            st.rerun()
+                        else:
+                            status.update(label="❌ 处理失败", state="error")
+
+    # 步骤 2: 结果预览
+    elif st.session_state.step == 2:
+        st.header("👀 结果预览")
+        
+        if st.session_state.results:
+            # 选择要预览的文件
+            file_options = list(st.session_state.results.keys())
+            selected_file = st.selectbox("选择要预览的文件", file_options)
+            
+            if selected_file:
+                df = st.session_state.results[selected_file]
+                file_info = st.session_state.file_infos.get(selected_file, {})
+                
+                # 显示文件信息摘要
+                with st.expander("📄 文件识别摘要", expanded=True):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("**产品类型:**", file_info.get('product_type', '未识别'))
+                        st.write("**品名:**", file_info.get('product_name', '未识别'))
+                        st.write("**品牌/厂家:**", file_info.get('brand', '未识别'))
+                        st.write("**单位:**", file_info.get('unit', '未识别'))
+                    with col2:
+                        st.write("**长度:**", file_info.get('length', '未识别'))
+                        st.write("**计价方式:**", file_info.get('price_type', '未识别'))
+                        st.write("**材质:**", file_info.get('material', '未识别'))
+                        st.write("**执行标准:**", file_info.get('standard', '未识别'))
+                
+                # 显示数据预览
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                
+                # 显示数据统计
+                with st.expander("📊 数据统计"):
+                    st.write(f"**数据形状:** {df.shape}")
+                    st.write(f"**列数:** {len(df.columns)}")
+                    st.write(f"**行数:** {len(df)}")
+            
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("⬅️ 返回上传", use_container_width=True):
+                    st.session_state.step = 1
+                    st.session_state.results = {}
+                    st.rerun()
+            with col2:
+                if st.button("✅ 确认无误，前往下载", type="primary", use_container_width=True):
+                    st.session_state.step = 3
+                    st.rerun()
+        else:
+            st.warning("暂无数据，请返回重新上传")
+            if st.button("返回"):
+                st.session_state.step = 1
+                st.rerun()
+
+    # 步骤 3: 下载结果
+    elif st.session_state.step == 3:
+        st.header("📥 下载结果")
+        
+        # 下载选项
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            download_format = st.radio(
+                "选择下载格式",
+                ["Excel", "CSV"],
+                horizontal=True
+            )
+        
+        with col2:
+            if len(st.session_state.results) > 1:
+                output_option = st.radio(
+                    "输出方式",
+                    ["合并所有文件", "分开下载文件"]
+                )
+            else:
+                output_option = "单个文件"
+        
+        # 高级选项
+        with st.expander("⚙️ 高级下载选项"):
+            include_file_info = st.checkbox("包含文件识别信息", value=True)
+            format_prices = st.checkbox("格式化价格列", value=True)
+        
+        # 自定义文件名
+        output_filename = st.text_input("输出文件名 (无需后缀)", value="智能提取结果")
+        
+        st.markdown("### 点击下方按钮下载")
+        
+        # 准备数据
+        if output_option == "合并所有文件":
+            # 合并所有DataFrame
+            all_data_frames = []
+            for filename, df in st.session_state.results.items():
+                df_copy = df.copy()
+                df_copy['来源文件'] = filename
+                if include_file_info and filename in st.session_state.file_infos:
+                    file_info = st.session_state.file_infos[filename]
+                    for key, value in file_info.items():
+                        if key not in df_copy.columns:
+                            df_copy[key] = value
+                all_data_frames.append(df_copy)
+            
+            if all_data_frames:
+                merged_df = pd.concat(all_data_frames, ignore_index=True)
+                
+                if download_format == "Excel":
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        merged_df.to_excel(writer, index=False, sheet_name='合并数据')
+                        if include_file_info:
+                            pd.DataFrame.from_dict(st.session_state.file_infos, orient='index').to_excel(writer, sheet_name='文件信息')
+                    output.seek(0)
+                    data = output
+                    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    ext = "xlsx"
+                else:
+                    data = merged_df.to_csv(index=False).encode('utf-8-sig')
+                    mime = "text/csv"
+                    ext = "csv"
+                    
+                st.download_button(
+                    label=f"📥 下载合并文件 (. {ext})",
+                    data=data,
+                    file_name=f"{output_filename}.{ext}",
+                    mime=mime,
+                    type="primary",
+                    use_container_width=True
+                )
+        else:
+            # 分开下载
+            st.info("请点击下方按钮分别下载文件：")
+            cols = st.columns(2)
+            for idx, (filename, df) in enumerate(st.session_state.results.items()):
+                base_name = filename.split('.')[0]
+                col = cols[idx % 2]
+                
+                if download_format == "Excel":
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='数据')
+                        if include_file_info and filename in st.session_state.file_infos:
+                            pd.DataFrame([st.session_state.file_infos[filename]]).to_excel(writer, sheet_name='文件信息', index=False)
+                    output.seek(0)
+                    data = output
+                    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    ext = "xlsx"
+                else:
+                    data = df.to_csv(index=False).encode('utf-8-sig')
+                    mime = "text/csv"
+                    ext = "csv"
+                
+                col.download_button(
+                    label=f"📥 {base_name}",
+                    data=data,
+                    file_name=f"{output_filename}_{base_name}.{ext}",
+                    mime=mime,
+                    key=f"dl_{idx}"
+                )
+        
+        st.markdown("---")
+        if st.button("🔄 开始新任务", use_container_width=True):
+            st.session_state.results = {}
+            st.session_state.file_infos = {}
+            st.session_state.step = 1
+            st.rerun()
+
+if __name__ == "__main__":
+    main()
