@@ -250,48 +250,75 @@ class ProductDataProcessor:
 
             if dimension_match:
                 dim1, dim2 = dimension_match.groups()
-                # 根据产品类型决定如何分配规格字段
-                if file_info['product_type'] in ['方矩管', '管材']:
-                    # 方矩管：型号=规格(30*30)，规格1=壁厚，规格2=长度
-                    spec1 = thickness
-                    spec2 = file_info.get('length', '')
-                    spec3 = ''  # 支重/kg，需要计算
-                    spec4 = ''  # 支/件
-                elif file_info['product_type'] in ['板材', '彩涂卷']:
-                    # 板材：规格1=厚度，规格2=宽度，规格3=长度
-                    spec1 = thickness
-                    spec2 = dim2 if int(dim1) > int(dim2) else dim1  # 假设较小的尺寸是宽度
-                    spec3 = dim1 if int(dim1) > int(dim2) else dim2  # 假设较大的尺寸是长度
-                    spec4 = ''
+            
+            # Initialize specs
+            spec1 = spec2 = spec3 = spec4 = ''
+            unit = file_info.get('unit', '件')
+            
+            p_type = file_info.get('product_type', '')
+            
+            # Extract dimensions for potential use
+            dims = re.findall(r'(\d+)', spec_str)
+            
+            if p_type == '方矩管':
+                # 规格1: 壁厚, 规格2: 长度, 规格3: 支重, 规格4: 支/件, 单位: 件
+                spec1 = thickness
+                spec2 = file_info.get('length', '')
+                unit = '件'
+                
+            elif p_type == '板材':
+                # 规格1: 厚度, 规格2: 宽度, 规格3: 长度, 规格4: kg/块, 单位: 块
+                spec1 = thickness
+                if len(dims) >= 2:
+                    # Assume Width * Length, sort so smaller is width
+                    try:
+                        d1, d2 = int(dims[0]), int(dims[1])
+                        spec2 = str(min(d1, d2)) # 宽度
+                        spec3 = str(max(d1, d2)) # 长度
+                    except:
+                        spec2 = dims[0]
+                        spec3 = dims[1]
+                elif len(dims) == 1:
+                    spec2 = dims[0] # 宽度
+                    spec3 = file_info.get('length', '')
                 else:
-                    # 其他类型
-                    spec1 = thickness
-                    spec2 = f"{dim1}*{dim2}"
-                    spec3 = ''
-                    spec4 = ''
-            # 处理正大热镀管模式的规格映射
-            elif '*' in spec_str and ('管' in file_info.get('product_type', '') or '镀锌' in file_info.get('product_name', '')):
-                # 格式如 "4分*1.2"
-                parts = spec_str.split('*')
-                if len(parts) >= 2:
-                    size_part = parts[0]
-                    thick_part = parts[1]
-                    
-                    spec1 = thick_part # 规格1 = 厚度
-                    spec2 = size_part  # 规格2 = 尺寸(4分)
-                    spec3 = file_info.get('length', '') # 规格3 = 长度
-                    spec4 = ''
-                else:
-                    spec1 = thickness
-                    spec2 = spec_str
-                    spec3 = ''
-                    spec4 = ''
+                    spec3 = file_info.get('length', '')
+                unit = '块'
+                
+            elif p_type == '型材':
+                # 规格1: 支重, 规格2: 长度, 规格3: 负差, 规格4: 支/件, 单位: 件
+                spec2 = file_info.get('length', '')
+                unit = '件'
+                
+            elif p_type == '管材':
+                # 规格1: 壁厚, 规格2: 长度, 规格3: 支重, 规格4: 支/件, 单位: 件
+                spec1 = thickness
+                spec2 = file_info.get('length', '')
+                spec4 = item.get('支数', '')
+                unit = '件'
+                
+            elif p_type == '矿用品':
+                # 规格1: 米重, 规格2: 长度, 规格3: 支/件, 规格4: Empty, 单位: 件
+                spec2 = file_info.get('length', '')
+                unit = '件'
+                
+            elif p_type == '棒材':
+                # 规格1: 长度, 规格2: 米重, 规格3: 支/件, 规格4: Empty, 单位: 件
+                spec1 = file_info.get('length', '')
+                unit = '件'
+                
+            elif p_type == '彩涂卷':
+                # 规格1: 厚度, 规格2: 宽度, 规格3: 长度, 规格4: kg/块
+                spec1 = thickness
+                if len(dims) >= 1:
+                    spec2 = dims[0] # 宽度
+                spec3 = file_info.get('length', '')
+                unit = '块'
+                
             else:
-                # 如果不是"长*宽"格式
+                # Default / 不锈钢 / Others
                 spec1 = thickness
                 spec2 = spec_str
-                spec3 = ''
-                spec4 = ''
             
             # 构建完整的模板记录
             record = {
@@ -302,7 +329,7 @@ class ProductDataProcessor:
                 '规格2': spec2,
                 '规格3': spec3,
                 '规格4': spec4,
-                '单位': file_info['unit'] or '',
+                '单位': unit,
                 '材质': file_info['material'] or '',
                 '执行标准': file_info['standard'] or '',
                 '品牌/厂家': file_info['brand'] or '',
