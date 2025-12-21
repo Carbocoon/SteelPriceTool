@@ -329,6 +329,7 @@ class ProductDataProcessor:
                 '规格2': spec2,
                 '规格3': spec3,
                 '规格4': spec4,
+                '规格5': '',
                 '单位': unit,
                 '材质': file_info['material'] or '',
                 '执行标准': file_info['standard'] or '',
@@ -346,7 +347,8 @@ class ProductDataProcessor:
                 '库存': '',
                 '供应商/联系方式': file_info['contact'] or '',
                 '供货价/元': price,
-                '差价/元': ''
+                '差价/元': '',
+                '是否显示': ''
             }
             
             template_records.append(record)
