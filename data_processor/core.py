@@ -322,12 +322,19 @@ class ProductDataProcessor:
             
             # 处理管材型号：只保留xx寸/xx分
             model_val = spec_str
-            if p_type == '管材' or '管' in full_product_name:
-                 if '*' in spec_str:
-                     parts = spec_str.split('*')
-                     # Check if first part has '寸' or '分'
-                     if '寸' in parts[0] or '分' in parts[0]:
-                         model_val = parts[0]
+            # 判定是否为圆形管材（排除方矩管）
+            is_round_pipe = p_type == '管材' or (
+                '管' in full_product_name and 
+                p_type != '方矩管' and 
+                '方' not in full_product_name and 
+                '矩' not in full_product_name
+            )
+            
+            if is_round_pipe and '*' in spec_str:
+                 parts = spec_str.split('*')
+                 # 对于圆管，格式通常为 口径*壁厚
+                 # 用户要求保留xx寸/xx分，即保留口径部分
+                 model_val = parts[0].strip()
 
             # 构建完整的模板记录
             record = {
@@ -352,7 +359,7 @@ class ProductDataProcessor:
                 '四等价格/元/吨': '',
                 '五等价格/元/吨': '',
                 '过磅/理计': file_info['price_type'] or '',
-                '备注': '; '.join(file_info['notes']) if file_info['notes'] else f"规格: {spec_str}",
+                '备注': '; '.join(file_info['notes']) if file_info['notes'] else f"规格: {model_val}",
                 '库存': '',
                 '供应商/联系方式': file_info['contact'] or '',
                 '供货价/元': price,
