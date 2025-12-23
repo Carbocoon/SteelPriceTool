@@ -2,14 +2,9 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from data_processor import ProductDataProcessor, BatchProcessor
+from toolbox_ui import render_toolbox
 
-def main():
-    st.set_page_config(
-        page_title="产品数据智能提取工具",
-        page_icon="🤖",
-        layout="wide"
-    )
-    
+def render_extraction_tool():
     st.title("🤖 产品数据智能提取工具")
     
     # 初始化处理器
@@ -24,7 +19,7 @@ def main():
     
     # 侧边栏配置
     with st.sidebar:
-        st.header("🛠️ 工具箱")
+        st.header("🛠️ 提取设置")
         
         # 厂家选择
         manufacturer = st.selectbox(
@@ -43,10 +38,14 @@ def main():
         st.markdown("---")
         
         # 公告栏
-        with st.expander("📢 更新公告", expanded=True):
+        with st.expander("📢 公告", expanded=True):
             st.markdown("""
-            **2025-12-22**
+            **(2025-12-23)**
+            - 增加通用工具箱功能，可以处理普通表格功能         
+
+            **(2025-12-22)**
             - 🔧 优化管材型号显示 (只保留寸/分)
+
             **v1.2 更新 (2025-12-21)**
             - ✨ 新增规格映射与批量填充功能
             - 📊 完善各钢材类型的规格字段映射
@@ -344,6 +343,24 @@ def main():
             st.session_state.file_infos = {}
             st.session_state.step = 1
             st.rerun()
+
+def main():
+    st.set_page_config(
+        page_title="产品数据智能提取工具",
+        page_icon="🤖",
+        layout="wide"
+    )
+    
+    # 侧边栏导航
+    with st.sidebar:
+        st.title("🤖 菜单")
+        app_mode = st.radio("选择功能", ["智能提取", "通用工具箱"])
+        st.markdown("---")
+
+    if app_mode == "通用工具箱":
+        render_toolbox()
+    else:
+        render_extraction_tool()
 
 if __name__ == "__main__":
     main()
