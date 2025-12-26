@@ -24,8 +24,8 @@ def render_extraction_tool():
         # 厂家选择
         manufacturer = st.selectbox(
             "🏭 选择厂家",
-            ["自动识别", "正大制管", "其他厂家(待添加)"],
-            help="选择特定厂家可提高识别准确率"
+            ["请选择厂家", "正大制管", "亨旺", "其他厂家(待添加)"],
+            help="必须选择一个厂家以进行准确匹配"
         )
         
         # 重置按钮
@@ -40,15 +40,16 @@ def render_extraction_tool():
         # 公告栏
         with st.expander("📢 公告", expanded=True):
             st.markdown("""
+            **v1.3更新(2025-12-26)**
+            - 增加“亨旺物流”厂家匹配
+            - 增加强制型选择厂家功能
+            - 修复已知问题
+
             **(2025-12-23)**
             - 增加通用工具箱功能，可以处理普通表格功能         
 
             **(2025-12-22)**
             - 🔧 优化管材型号显示 (只保留寸/分)
-
-            **v1.2 更新 (2025-12-21)**
-            - ✨ 新增规格映射与批量填充功能
-            - 📊 完善各钢材类型的规格字段映射
             """)
 
         # 使用说明
@@ -102,29 +103,32 @@ def render_extraction_tool():
                 
                 # 处理按钮
                 if st.button("🚀 开始智能提取", type="primary", use_container_width=True):
-                    # 使用 status 容器显示进度
-                    with st.status("正在处理文件...", expanded=True) as status:
-                        # 创建批处理器
-                        batch_processor = BatchProcessor()
-                        
-                        st.write("正在初始化处理器...")
-                        # 处理所有文件
-                        results, file_infos = batch_processor.process_multiple_files(
-                            uploaded_files,
-                            manufacturer=manufacturer
-                        )
-                        
-                        # 保存结果到session state
-                        st.session_state.results = results
-                        st.session_state.file_infos = file_infos
-                        
-                        if results:
-                            status.update(label="✅ 处理完成！", state="complete", expanded=False)
-                            st.success(f"成功处理 {len(results)} 个文件")
-                            st.session_state.step = 2
-                            st.rerun()
-                        else:
-                            status.update(label="❌ 处理失败", state="error")
+                    if manufacturer == "请选择厂家":
+                        st.error("⚠️ 请先在左侧侧边栏选择一个厂家！")
+                    else:
+                        # 使用 status 容器显示进度
+                        with st.status("正在处理文件...", expanded=True) as status:
+                            # 创建批处理器
+                            batch_processor = BatchProcessor()
+                            
+                            st.write("正在初始化处理器...")
+                            # 处理所有文件
+                            results, file_infos = batch_processor.process_multiple_files(
+                                uploaded_files,
+                                manufacturer=manufacturer
+                            )
+                            
+                            # 保存结果到session state
+                            st.session_state.results = results
+                            st.session_state.file_infos = file_infos
+                            
+                            if results:
+                                status.update(label="✅ 处理完成！", state="complete", expanded=False)
+                                st.success(f"成功处理 {len(results)} 个文件")
+                                st.session_state.step = 2
+                                st.rerun()
+                            else:
+                                status.update(label="❌ 处理失败", state="error")
 
     # 步骤 2: 结果预览
     elif st.session_state.step == 2:
@@ -208,14 +212,24 @@ def render_extraction_tool():
                                 st.success("填充完成！")
                                 st.rerun()
 
-                # 显示数据预览
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                # 显示数据预览 (可编辑)
+                st.info("💡 提示：您可以直接点击表格中的单元格进行修改，修改后的内容将包含在下载文件中。")
+                edited_df = st.data_editor(
+                    df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    key=f"editor_{selected_file}"
+                )
+                
+                # 实时更新Session State
+                if not edited_df.equals(df):
+                    st.session_state.results[selected_file] = edited_df
                 
                 # 显示数据统计
                 with st.expander("📊 数据统计"):
-                    st.write(f"**数据形状:** {df.shape}")
-                    st.write(f"**列数:** {len(df.columns)}")
-                    st.write(f"**行数:** {len(df)}")
+                    st.write(f"**数据形状:** {edited_df.shape}")
+                    st.write(f"**列数:** {len(edited_df.columns)}")
+                    st.write(f"**行数:** {len(edited_df)}")
             
             col1, col2 = st.columns([1, 3])
             with col1:
@@ -277,6 +291,9 @@ def render_extraction_tool():
                     file_info = st.session_state.file_infos[filename]
                     for key, value in file_info.items():
                         if key not in df_copy.columns:
+                            # 如果是列表（如notes），转换为字符串，避免长度不匹配错误
+                            if isinstance(value, list):
+                                value = "; ".join(map(str, value))
                             df_copy[key] = value
                 all_data_frames.append(df_copy)
             

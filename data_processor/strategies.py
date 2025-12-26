@@ -192,3 +192,153 @@ class ThreeColumnStrategy(ExtractionStrategy):
                         })
         
         return records, column_headers
+
+class HengwangPipeStrategy(ExtractionStrategy):
+    """Strategy for Hengwang Pipe format (Spec | Thickness | Weighing Price | Theoretical Price)"""
+    
+    def match(self, df: pd.DataFrame) -> Tuple[bool, int, int]:
+        for i in range(min(20, len(df))):
+            row_str = df.iloc[i].astype(str).str.cat(sep=' ')
+            # Check for key headers
+            if '壁厚' in row_str and '过磅' in row_str and '检尺' in row_str:
+                return True, i, i + 1
+        return False, -1, -1
+
+    def extract(self, df: pd.DataFrame, header_row: int, data_start_row: int) -> Tuple[List[Dict], List[str]]:
+        records = []
+        column_headers = self.get_column_headers(df, header_row)
+        
+        # We need to get the brand from the row above the header row.
+        brand_row_idx = header_row - 1
+        
+        last_specs = {} # Map col_idx -> {'spec': str, 'weight': float}
+        
+        # Iterate columns in steps of 4 (Spec, Thickness, Weighing, Theoretical)
+        for start_col in range(0, len(df.columns) - 3, 4):
+            # Check if this block looks valid (has "壁厚" in header row)
+            if start_col + 1 >= len(df.columns): break
+            
+            header_val = str(df.iloc[header_row, start_col+1]).strip()
+            if '壁厚' not in header_val:
+                continue
+                
+            # Get Brand from the row above
+            brand_name = ""
+            if brand_row_idx >= 0:
+                val = str(df.iloc[brand_row_idx, start_col]).strip()
+                if val and val != 'nan':
+                    brand_name = val
+            
+            # Clean brand name and determine product name
+            final_brand = ""
+            product_name = ""
+            
+            if '正大' in brand_name: 
+                final_brand = '正大'
+                if '镀锌' in brand_name: product_name = '镀锌管'
+            elif '友发' in brand_name: 
+                final_brand = '友发'
+                if '镀锌' in brand_name: product_name = '镀锌管'
+            elif '焊管' in brand_name: 
+                final_brand = '亨旺' # Default for generic pipe
+                product_name = '焊管'
+            elif brand_name and '管' in brand_name: 
+                final_brand = brand_name # Fallback
+                if '镀锌' in brand_name: product_name = '镀锌管'
+                elif '焊' in brand_name: product_name = '焊管'
+            
+            spec_col = start_col
+            thick_col = start_col + 1
+            price_col = start_col + 2 # 过磅
+            theo_price_col = start_col + 3 # 检尺/理计
+            
+            # Iterate rows
+            for row_idx in range(data_start_row, len(df)):
+                row = df.iloc[row_idx]
+                
+                # Extract Spec
+                raw_spec = row.iloc[spec_col]
+                if pd.notna(raw_spec) and str(raw_spec).strip() and str(raw_spec).strip() != 'nan':
+                    spec_str = str(raw_spec).strip()
+                    
+                    # Extract "xx分" or "xx寸"
+                    import re
+                    model_match = re.search(r'(\d+\.?\d*[寸分])', spec_str)
+                    clean_spec = model_match.group(1) if model_match else None
+                    
+                    # Extract Weight (look for standalone number)
+                    weight_val = None
+                    # Split by whitespace or newline to find numbers
+                    parts = re.split(r'[\s\n]+', spec_str)
+                    for part in parts:
+                        try:
+                            # Check if it is a number
+                            val = float(part)
+                            # Heuristic: Weight is usually a small float (e.g. 7.56), not 2025 (year) or 15 (DN15)
+                            # But DN15 is 15. 
+                            # If we have "DN15", part is "DN15" (not float) or "DN" and "15".
+                            # If "DN15" is one token, float("DN15") fails.
+                            # If "DN 15", float("15") works.
+                            # However, the image shows "DN15" on one line, "4分" on next, "7.56" on next.
+                            # If they are in one cell, they are separated by newline.
+                            # "DN15" -> fail float.
+                            # "4分" -> fail float.
+                            # "7.56" -> success float.
+                            weight_val = val
+                        except ValueError:
+                            pass
+                    
+                    if clean_spec:
+                        last_specs[start_col] = {'spec': clean_spec, 'weight': weight_val}
+                
+                current_data = last_specs.get(start_col)
+                if not current_data:
+                    continue
+                
+                current_spec = current_data['spec']
+                current_weight = current_data['weight']
+                
+                # Extract Thickness and Price
+                thickness = row.iloc[thick_col]
+                price = row.iloc[price_col]
+                theo_price = row.iloc[theo_price_col] if theo_price_col < len(row) else None
+                
+                if pd.isna(thickness) or (pd.isna(price) and pd.isna(theo_price)):
+                    continue
+                    
+                # Validate thickness (should be number)
+                try:
+                    float(thickness)
+                except:
+                    continue
+                    
+                # Validate prices
+                p_val = 0
+                if pd.notna(price):
+                    try:
+                        p_val = float(price)
+                    except:
+                        pass
+                
+                t_val = 0
+                if pd.notna(theo_price):
+                    try:
+                        t_val = float(theo_price)
+                    except:
+                        pass
+                
+                if p_val == 0 and t_val == 0:
+                    continue
+                
+                records.append({
+                    '规格': current_spec,
+                    '厚度': format_thickness(str(thickness)),
+                    '价格': p_val, # 过磅价格
+                    '理计价格': t_val, # 理计价格
+                    '品牌/厂家': final_brand,
+                    '品名': product_name,
+                    '型号': current_spec,
+                    '支重': current_weight
+                })
+
+        return records, column_headers

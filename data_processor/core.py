@@ -5,13 +5,14 @@ import streamlit as st
 from io import BytesIO
 from typing import Dict, List, Tuple, Optional, Any
 from .utils import normalize_length
-from .strategies import ZhengdaGalvanizedStrategy, FourColumnStrategy, ThreeColumnStrategy
+from .strategies import ZhengdaGalvanizedStrategy, FourColumnStrategy, ThreeColumnStrategy, HengwangPipeStrategy
 
 class ProductDataProcessor:
     """产品数据处理核心类 - 动态识别版本"""
     
     def __init__(self):
         self.strategies = [
+            HengwangPipeStrategy(),
             ZhengdaGalvanizedStrategy(),
             FourColumnStrategy(),
             ThreeColumnStrategy() # Default fallback
@@ -152,9 +153,18 @@ class ProductDataProcessor:
         
         return file_info
     
-    def extract_price_data(self, df: pd.DataFrame) -> Tuple[List[Dict], List[str]]:
+    def extract_price_data(self, df: pd.DataFrame, manufacturer: str = None) -> Tuple[List[Dict], List[str]]:
         """从源数据表格中提取价格信息，返回价格数据和列头信息"""
-        for strategy in self.strategies:
+        
+        # 根据厂家调整策略优先级
+        strategies_to_try = self.strategies
+        if manufacturer and ('亨旺' in manufacturer or 'Hengwang' in manufacturer):
+            # 优先尝试亨旺策略
+            hw_strategies = [s for s in self.strategies if isinstance(s, HengwangPipeStrategy)]
+            other_strategies = [s for s in self.strategies if not isinstance(s, HengwangPipeStrategy)]
+            strategies_to_try = hw_strategies + other_strategies
+            
+        for strategy in strategies_to_try:
             is_match, header_row, data_start_row = strategy.match(df)
             if is_match:
                 return strategy.extract(df, header_row, data_start_row)
@@ -231,22 +241,26 @@ class ProductDataProcessor:
                 shape_suffix = "矩管"
             
             # 构建完整品名
-            base_name = file_info['product_name'] or ''
-            
-            full_product_name = base_name
-            if shape_suffix:
-                if base_name == '黑':
-                    full_product_name = f"黑{shape_suffix}"
-                elif shape_suffix not in base_name:
-                    if '方矩管' in base_name:
-                        full_product_name = base_name.replace('方矩管', shape_suffix)
-                    else:
-                        full_product_name = f"{base_name}{shape_suffix}"
-            
-            # 特殊处理：如果是正大热镀管模式，品名强制为"镀锌管"
-            if '热镀' in file_info.get('product_name', '') or '镀锌' in file_info.get('product_name', ''):
-                if file_info.get('product_type') == '管材':
-                    full_product_name = "镀锌管"
+            # 优先使用item中的品名（如果策略已提取）
+            if item.get('品名'):
+                full_product_name = item['品名']
+            else:
+                base_name = file_info['product_name'] or ''
+                
+                full_product_name = base_name
+                if shape_suffix:
+                    if base_name == '黑':
+                        full_product_name = f"黑{shape_suffix}"
+                    elif shape_suffix not in base_name:
+                        if '方矩管' in base_name:
+                            full_product_name = base_name.replace('方矩管', shape_suffix)
+                        else:
+                            full_product_name = f"{base_name}{shape_suffix}"
+                
+                # 特殊处理：如果是正大热镀管模式，品名强制为"镀锌管"
+                if '热镀' in file_info.get('product_name', '') or '镀锌' in file_info.get('product_name', ''):
+                    if file_info.get('product_type') == '管材':
+                        full_product_name = "镀锌管"
 
             if dimension_match:
                 dim1, dim2 = dimension_match.groups()
@@ -294,6 +308,7 @@ class ProductDataProcessor:
                 # 规格1: 壁厚, 规格2: 长度, 规格3: 支重, 规格4: 支/件, 单位: 件
                 spec1 = thickness
                 spec2 = file_info.get('length', '')
+                spec3 = item.get('支重', '')
                 spec4 = item.get('支数', '')
                 unit = '件'
                 
@@ -337,6 +352,26 @@ class ProductDataProcessor:
                  model_val = parts[0].strip()
 
             # 构建完整的模板记录
+            # 优先使用item中的品牌/厂家，如果为空则使用file_info中的
+            item_brand = item.get('品牌/厂家', '')
+            final_brand = item_brand if item_brand else (file_info['brand'] or '')
+            
+            # 价格处理逻辑
+            # 1. 获取过磅价格和理计价格
+            price_weighing = item.get('价格', 0) # 默认'价格'字段存储过磅价格
+            price_theoretical = item.get('理计价格', 0)
+            
+            # 2. 确定默认价格：优先理计，其次过磅
+            default_price = price_theoretical if price_theoretical > 0 else price_weighing
+            
+            # 3. 格式化价格（如果为0则留空）
+            def fmt_price(p):
+                if p <= 0: return ''
+                try:
+                    return int(p)
+                except:
+                    return p
+
             record = {
                 '类型': file_info['product_type'] or '',
                 '品名': full_product_name,
@@ -349,20 +384,26 @@ class ProductDataProcessor:
                 '单位': unit,
                 '材质': file_info['material'] or '',
                 '执行标准': file_info['standard'] or '',
-                '品牌/厂家': file_info['brand'] or '',
+                '品牌/厂家': final_brand,
                 '提货地/省': file_info['location_province'] or '',
                 '提货地/市': file_info['location_city'] or '',
                 '提货地/区': file_info['location_area'] or '',
-                '默认价格/元/吨': price,
-                '二等价格/元/吨': '',
-                '三等价格/元/吨': '',
-                '四等价格/元/吨': '',
-                '五等价格/元/吨': '',
-                '过磅/理计': file_info['price_type'] or '',
+                '一等过磅价格/元/吨': '',
+                '一等理计价格/元/吨': '',
+                '二等过磅价格/元/吨': '',
+                '二等理计价格/元/吨': '',
+                '三等过磅价格/元/吨': '',
+                '三等理计价格/元/吨': '',
+                '四等过磅价格/元/吨': '',
+                '四等理计价格/元/吨': '',
+                '五等过磅价格/元/吨': '',
+                '五等理计价格/元/吨': '',
+                '过磅价格/元/吨': fmt_price(price_weighing),
+                '理计价格/元/吨': fmt_price(price_theoretical),
                 '备注': '; '.join(file_info['notes']) if file_info['notes'] else f"规格: {model_val}",
                 '库存': '',
                 '供应商/联系方式': file_info['contact'] or '',
-                '供货价/元': price,
+                '供货价/元': fmt_price(default_price),
                 '差价/元': '',
                 '是否显示': ''
             }
@@ -408,7 +449,7 @@ class ProductDataProcessor:
             file_info['brand'] = manufacturer
         
         # 第二步：提取价格数据
-        price_data, column_headers = self.extract_price_data(source_df)
+        price_data, column_headers = self.extract_price_data(source_df, manufacturer)
         
         if not price_data:
             st.warning("未提取到价格数据")
