@@ -5,13 +5,14 @@ import streamlit as st
 from io import BytesIO
 from typing import Dict, List, Tuple, Optional, Any
 from .utils import normalize_length
-from .strategies import ZhengdaGalvanizedStrategy, FourColumnStrategy, ThreeColumnStrategy, HengwangPipeStrategy
+from .strategies import ZhengdaGalvanizedStrategy, FourColumnStrategy, ThreeColumnStrategy, HengwangPipeStrategy, YihengPlateStrategy
 
 class ProductDataProcessor:
     """产品数据处理核心类 - 动态识别版本"""
     
     def __init__(self):
         self.strategies = [
+            YihengPlateStrategy(),
             HengwangPipeStrategy(),
             ZhengdaGalvanizedStrategy(),
             FourColumnStrategy(),
@@ -265,8 +266,11 @@ class ProductDataProcessor:
             if dimension_match:
                 dim1, dim2 = dimension_match.groups()
             
-            # Initialize specs
-            spec1 = spec2 = spec3 = spec4 = ''
+            # Initialize specs from item if available, otherwise empty
+            spec1 = str(item.get('规格1', '')).strip()
+            spec2 = str(item.get('规格2', '')).strip()
+            spec3 = str(item.get('规格3', '')).strip()
+            spec4 = str(item.get('规格4', '')).strip()
             unit = file_info.get('unit', '件')
             
             p_type = file_info.get('product_type', '')
@@ -358,7 +362,7 @@ class ProductDataProcessor:
             
             # 价格处理逻辑
             # 1. 获取过磅价格和理计价格
-            price_weighing = item.get('价格', 0) # 默认'价格'字段存储过磅价格
+            price_weighing = item.get('价格', 0)
             price_theoretical = item.get('理计价格', 0)
             
             # 2. 确定默认价格：优先理计，其次过磅
@@ -373,7 +377,7 @@ class ProductDataProcessor:
                     return p
 
             record = {
-                '类型': file_info['product_type'] or '',
+                '类型': item.get('类型') or file_info['product_type'] or '',
                 '品名': full_product_name,
                 '型号': model_val,  # 型号使用处理后的值
                 '规格1': spec1,
@@ -382,12 +386,12 @@ class ProductDataProcessor:
                 '规格4': spec4,
                 '规格5': '',
                 '单位': unit,
-                '材质': file_info['material'] or '',
+                '材质': item.get('材质') or file_info['material'] or '',
                 '执行标准': file_info['standard'] or '',
                 '品牌/厂家': final_brand,
-                '提货地/省': file_info['location_province'] or '',
-                '提货地/市': file_info['location_city'] or '',
-                '提货地/区': file_info['location_area'] or '',
+                '提货地/省': item.get('提货地/省') or file_info['location_province'] or '',
+                '提货地/市': item.get('提货地/市') or file_info['location_city'] or '',
+                '提货地/区': item.get('提货地/区') or file_info['location_area'] or '',
                 '一等过磅价格/元/吨': '',
                 '一等理计价格/元/吨': '',
                 '二等过磅价格/元/吨': '',

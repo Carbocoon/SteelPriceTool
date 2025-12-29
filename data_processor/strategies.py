@@ -342,3 +342,127 @@ class HengwangPipeStrategy(ExtractionStrategy):
                 })
 
         return records, column_headers
+
+class YihengPlateStrategy(ExtractionStrategy):
+    """Strategy for Yiheng Plate format (Merged Mat | Mat | Thickness | Width | Length | Origin | Location | Price | ...)"""
+    
+    def match(self, df: pd.DataFrame) -> Tuple[bool, int, int]:
+        # Look for key headers in the first few rows
+        for i in range(min(20, len(df))):
+            row_str = df.iloc[i].astype(str).str.cat(sep=' ')
+            if '材质' in row_str and '厚度' in row_str and '宽度' in row_str and '长度' in row_str and '产地' in row_str:
+                return True, i, i + 1
+        return False, -1, -1
+
+    def extract(self, df: pd.DataFrame, header_row: int, data_start_row: int) -> Tuple[List[Dict], List[str]]:
+        records = []
+        column_headers = self.get_column_headers(df, header_row)
+        
+        # Find all "厚度" columns to identify table blocks
+        thickness_cols = []
+        for col in range(len(df.columns)):
+            val = str(df.iloc[header_row, col]).strip()
+            if '厚度' in val:
+                thickness_cols.append(col)
+        
+        # State for merged materials (one per table block)
+        # Key: thickness_col_index, Value: current_merged_material
+        current_merged_materials = {col: None for col in thickness_cols}
+        
+        current_product_name = "容器板" # Default
+        
+        for row_idx in range(data_start_row, len(df)):
+            row = df.iloc[row_idx]
+            if row.dropna(how='all').empty: continue
+            
+            row_text = row.astype(str).str.cat(sep=' ')
+            
+            # Check for section headers
+            if '低温容器板' in row_text:
+                current_product_name = "低温容器板"
+                # Reset merged materials for this section
+                current_merged_materials = {col: None for col in thickness_cols}
+                continue
+            elif '容器板' in row_text and '低温' not in row_text:
+                 pass
+            
+            if '电话' in row_text:
+                continue
+
+            for t_col in thickness_cols:
+                # Define column offsets relative to Thickness column
+                # Based on: MergedMat(t-2), Mat(t-1), Thick(t), Width(t+1), Len(t+2), Origin(t+3), Loc(t+4), Price(t+5), UnitWt(t+6)
+                
+                merged_mat_col = t_col - 2
+                specific_mat_col = t_col - 1
+                width_col = t_col + 1
+                len_col = t_col + 2
+                origin_col = t_col + 3
+                loc_col = t_col + 4
+                price_col = t_col + 5
+                unit_wt_col = t_col + 6
+                
+                if price_col >= len(df.columns): continue
+                
+                # Update Merged Material
+                if merged_mat_col >= 0:
+                    val = row.iloc[merged_mat_col]
+                    if pd.notna(val) and str(val).strip() and str(val).strip() != 'nan':
+                        current_merged_materials[t_col] = str(val).strip()
+                
+                merged_mat = current_merged_materials.get(t_col)
+                
+                # Get Specific Material
+                spec_mat_val = row.iloc[specific_mat_col] if specific_mat_col >= 0 else None
+                spec_mat = str(spec_mat_val).strip() if pd.notna(spec_mat_val) else ""
+                
+                # Determine Final Material
+                # Priority: Merged Material > Specific Material (if different, overwrite with Merged)
+                # Actually, if Merged exists, use it.
+                final_mat = merged_mat if merged_mat else spec_mat
+                
+                # Get other values
+                thickness = row.iloc[t_col]
+                width = row.iloc[width_col]
+                length = row.iloc[len_col]
+                origin = row.iloc[origin_col]
+                location = row.iloc[loc_col]
+                price = row.iloc[price_col]
+                unit_wt = row.iloc[unit_wt_col] if unit_wt_col < len(df.columns) else None
+                
+                # Validate Price
+                if pd.isna(price) or str(price).strip() == '': continue
+                try:
+                    p_val = float(price)
+                except:
+                    continue
+                
+                if not final_mat: continue
+                
+                # Format
+                t_str = format_thickness(str(thickness)) if pd.notna(thickness) else ""
+                w_str = str(width).strip() if pd.notna(width) else ""
+                l_str = str(length).strip() if pd.notna(length) else ""
+                uw_str = str(unit_wt).strip() if pd.notna(unit_wt) else ""
+                origin_str = str(origin).strip() if pd.notna(origin) else ""
+                loc_str = str(location).strip() if pd.notna(location) else ""
+                
+                records.append({
+                    '类型': '板材',
+                    '品名': current_product_name,
+                    '材质': final_mat,
+                    '规格': f"{w_str}*{l_str}",
+                    '厚度': t_str,
+                    '价格': int(p_val),
+                    '规格1': t_str,
+                    '规格2': w_str,
+                    '规格3': l_str,
+                    '规格4': uw_str,
+                    '品牌/厂家': origin_str,
+                    '提货地/市': loc_str,
+                    '默认价格': int(p_val),
+                    '过磅价格': int(p_val),
+                    '理计价格': 0
+                })
+                
+        return records, column_headers
