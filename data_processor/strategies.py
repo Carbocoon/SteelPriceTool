@@ -48,7 +48,6 @@ class ZhengdaGalvanizedStrategy(ExtractionStrategy):
             row = df.iloc[row_idx]
             if row.dropna().empty: continue
 
-            # Zhengda format: Spec(0), Price(1), Count(2) - repeated
             for start_col in range(0, len(row) - 2, 3):
                 spec_col, price_col, count_col = start_col, start_col + 1, start_col + 2
                 if price_col >= len(row): continue
@@ -56,7 +55,6 @@ class ZhengdaGalvanizedStrategy(ExtractionStrategy):
                 spec_val = str(row.iloc[spec_col]).strip() if spec_col < len(row) and pd.notna(row.iloc[spec_col]) else ""
                 price = row.iloc[price_col] if price_col < len(row) and pd.notna(row.iloc[price_col]) else None
                 
-                # Extract count
                 count_val = row.iloc[count_col] if count_col < len(row) and pd.notna(row.iloc[count_col]) else None
                 if count_val is not None and str(count_val).strip():
                      last_counts[start_col] = count_val
@@ -65,7 +63,6 @@ class ZhengdaGalvanizedStrategy(ExtractionStrategy):
 
                 if not spec_val or not price: continue
 
-                # Spec inheritance logic
                 if '*' in spec_val:
                     parts = spec_val.split('*')
                     if len(parts) >= 2:
@@ -111,17 +108,14 @@ class FourColumnStrategy(ExtractionStrategy):
             row = df.iloc[row_idx]
             if row.dropna().empty: continue
 
-            # 4-col format: Square(0), Rect(1), Thickness(2), Price(3)
             for start_col in range(0, len(row) - 3, 4):
                 sq_col, rect_col, thick_col, price_col = start_col, start_col+1, start_col+2, start_col+3
                 if price_col >= len(row): continue
 
-                # Square specs
                 sq_specs = parse_spec_cell(row.iloc[sq_col]) if sq_col < len(row) else []
                 if sq_specs: last_specs[sq_col] = sq_specs
                 sq_specs_to_use = sq_specs if sq_specs else last_specs.get(sq_col, [])
 
-                # Rect specs
                 rect_specs = parse_spec_cell(row.iloc[rect_col]) if rect_col < len(row) else []
                 if rect_specs: last_specs[rect_col] = rect_specs
                 rect_specs_to_use = rect_specs if rect_specs else last_specs.get(rect_col, [])
@@ -146,19 +140,16 @@ class ThreeColumnStrategy(ExtractionStrategy):
     """Strategy for standard 3-column format (Spec | Thickness | Price)"""
     
     def match(self, df: pd.DataFrame) -> Tuple[bool, int, int]:
-        # Try to find standard header
         for i in range(min(20, len(df))):
             row_str = df.iloc[i].astype(str).str.cat(sep=' ')
             if '规格' in row_str and '厚度' in row_str and '价格' in row_str:
                 return True, i, i + 1
         
-        # Fallback: just look for '规格'
         for i in range(min(10, len(df))):
             row_str = df.iloc[i].astype(str).str.cat(sep=' ')
             if '规格' in row_str:
                 return True, i, i + 1
         
-        # Last resort fallback
         return True, 6, 7
 
     def extract(self, df: pd.DataFrame, header_row: int, data_start_row: int) -> Tuple[List[Dict], List[str]]:
@@ -170,7 +161,6 @@ class ThreeColumnStrategy(ExtractionStrategy):
             row = df.iloc[row_idx]
             if row.dropna().empty: continue
 
-            # 3-col format: Spec(0), Thickness(1), Price(2)
             for start_col in range(0, len(row) - 2, 3):
                 spec_col, thick_col, price_col = start_col, start_col+1, start_col+2
                 if price_col >= len(row): continue
@@ -199,7 +189,6 @@ class HengwangPipeStrategy(ExtractionStrategy):
     def match(self, df: pd.DataFrame) -> Tuple[bool, int, int]:
         for i in range(min(20, len(df))):
             row_str = df.iloc[i].astype(str).str.cat(sep=' ')
-            # Check for key headers
             if '壁厚' in row_str and '过磅' in row_str and '检尺' in row_str:
                 return True, i, i + 1
         return False, -1, -1
@@ -208,28 +197,22 @@ class HengwangPipeStrategy(ExtractionStrategy):
         records = []
         column_headers = self.get_column_headers(df, header_row)
         
-        # We need to get the brand from the row above the header row.
         brand_row_idx = header_row - 1
         
-        last_specs = {} # Map col_idx -> {'spec': str, 'weight': float}
         
-        # Iterate columns in steps of 4 (Spec, Thickness, Weighing, Theoretical)
         for start_col in range(0, len(df.columns) - 3, 4):
-            # Check if this block looks valid (has "壁厚" in header row)
             if start_col + 1 >= len(df.columns): break
             
             header_val = str(df.iloc[header_row, start_col+1]).strip()
             if '壁厚' not in header_val:
                 continue
                 
-            # Get Brand from the row above
             brand_name = ""
             if brand_row_idx >= 0:
                 val = str(df.iloc[brand_row_idx, start_col]).strip()
                 if val and val != 'nan':
                     brand_name = val
             
-            # Clean brand name and determine product name
             final_brand = ""
             product_name = ""
             
@@ -240,50 +223,30 @@ class HengwangPipeStrategy(ExtractionStrategy):
                 final_brand = '友发'
                 if '镀锌' in brand_name: product_name = '镀锌管'
             elif '焊管' in brand_name: 
-                final_brand = '亨旺' # Default for generic pipe
                 product_name = '焊管'
             elif brand_name and '管' in brand_name: 
-                final_brand = brand_name # Fallback
                 if '镀锌' in brand_name: product_name = '镀锌管'
                 elif '焊' in brand_name: product_name = '焊管'
             
             spec_col = start_col
             thick_col = start_col + 1
-            price_col = start_col + 2 # 过磅
-            theo_price_col = start_col + 3 # 检尺/理计
             
-            # Iterate rows
             for row_idx in range(data_start_row, len(df)):
                 row = df.iloc[row_idx]
                 
-                # Extract Spec
                 raw_spec = row.iloc[spec_col]
                 if pd.notna(raw_spec) and str(raw_spec).strip() and str(raw_spec).strip() != 'nan':
                     spec_str = str(raw_spec).strip()
                     
-                    # Extract "xx分" or "xx寸"
                     import re
                     model_match = re.search(r'(\d+\.?\d*[寸分])', spec_str)
                     clean_spec = model_match.group(1) if model_match else None
                     
-                    # Extract Weight (look for standalone number)
                     weight_val = None
-                    # Split by whitespace or newline to find numbers
                     parts = re.split(r'[\s\n]+', spec_str)
                     for part in parts:
                         try:
-                            # Check if it is a number
                             val = float(part)
-                            # Heuristic: Weight is usually a small float (e.g. 7.56), not 2025 (year) or 15 (DN15)
-                            # But DN15 is 15. 
-                            # If we have "DN15", part is "DN15" (not float) or "DN" and "15".
-                            # If "DN15" is one token, float("DN15") fails.
-                            # If "DN 15", float("15") works.
-                            # However, the image shows "DN15" on one line, "4分" on next, "7.56" on next.
-                            # If they are in one cell, they are separated by newline.
-                            # "DN15" -> fail float.
-                            # "4分" -> fail float.
-                            # "7.56" -> success float.
                             weight_val = val
                         except ValueError:
                             pass
@@ -298,7 +261,6 @@ class HengwangPipeStrategy(ExtractionStrategy):
                 current_spec = current_data['spec']
                 current_weight = current_data['weight']
                 
-                # Extract Thickness and Price
                 thickness = row.iloc[thick_col]
                 price = row.iloc[price_col]
                 theo_price = row.iloc[theo_price_col] if theo_price_col < len(row) else None
@@ -306,13 +268,11 @@ class HengwangPipeStrategy(ExtractionStrategy):
                 if pd.isna(thickness) or (pd.isna(price) and pd.isna(theo_price)):
                     continue
                     
-                # Validate thickness (should be number)
                 try:
                     float(thickness)
                 except:
                     continue
                     
-                # Validate prices
                 p_val = 0
                 if pd.notna(price):
                     try:
@@ -333,8 +293,6 @@ class HengwangPipeStrategy(ExtractionStrategy):
                 records.append({
                     '规格': current_spec,
                     '厚度': format_thickness(str(thickness)),
-                    '价格': p_val, # 过磅价格
-                    '理计价格': t_val, # 理计价格
                     '品牌/厂家': final_brand,
                     '品名': product_name,
                     '型号': current_spec,
@@ -347,7 +305,6 @@ class YihengPlateStrategy(ExtractionStrategy):
     """Strategy for Yiheng Plate format (Merged Mat | Mat | Thickness | Width | Length | Origin | Location | Price | ...)"""
     
     def match(self, df: pd.DataFrame) -> Tuple[bool, int, int]:
-        # Look for key headers in the first few rows
         for i in range(min(20, len(df))):
             row_str = df.iloc[i].astype(str).str.cat(sep=' ')
             if '材质' in row_str and '厚度' in row_str and '宽度' in row_str and '长度' in row_str and '产地' in row_str:
@@ -358,18 +315,14 @@ class YihengPlateStrategy(ExtractionStrategy):
         records = []
         column_headers = self.get_column_headers(df, header_row)
         
-        # Find all "厚度" columns to identify table blocks
         thickness_cols = []
         for col in range(len(df.columns)):
             val = str(df.iloc[header_row, col]).strip()
             if '厚度' in val:
                 thickness_cols.append(col)
         
-        # State for merged materials (one per table block)
-        # Key: thickness_col_index, Value: current_merged_material
         current_merged_materials = {col: None for col in thickness_cols}
         
-        current_product_name = "容器板" # Default
         
         for row_idx in range(data_start_row, len(df)):
             row = df.iloc[row_idx]
@@ -377,10 +330,8 @@ class YihengPlateStrategy(ExtractionStrategy):
             
             row_text = row.astype(str).str.cat(sep=' ')
             
-            # Check for section headers
             if '低温容器板' in row_text:
                 current_product_name = "低温容器板"
-                # Reset merged materials for this section
                 current_merged_materials = {col: None for col in thickness_cols}
                 continue
             elif '容器板' in row_text and '低温' not in row_text:
@@ -390,8 +341,6 @@ class YihengPlateStrategy(ExtractionStrategy):
                 continue
 
             for t_col in thickness_cols:
-                # Define column offsets relative to Thickness column
-                # Based on: MergedMat(t-2), Mat(t-1), Thick(t), Width(t+1), Len(t+2), Origin(t+3), Loc(t+4), Price(t+5), UnitWt(t+6)
                 
                 merged_mat_col = t_col - 2
                 specific_mat_col = t_col - 1
@@ -404,7 +353,6 @@ class YihengPlateStrategy(ExtractionStrategy):
                 
                 if price_col >= len(df.columns): continue
                 
-                # Update Merged Material
                 if merged_mat_col >= 0:
                     val = row.iloc[merged_mat_col]
                     if pd.notna(val) and str(val).strip() and str(val).strip() != 'nan':
@@ -412,16 +360,11 @@ class YihengPlateStrategy(ExtractionStrategy):
                 
                 merged_mat = current_merged_materials.get(t_col)
                 
-                # Get Specific Material
                 spec_mat_val = row.iloc[specific_mat_col] if specific_mat_col >= 0 else None
                 spec_mat = str(spec_mat_val).strip() if pd.notna(spec_mat_val) else ""
                 
-                # Determine Final Material
-                # Priority: Merged Material > Specific Material (if different, overwrite with Merged)
-                # Actually, if Merged exists, use it.
                 final_mat = merged_mat if merged_mat else spec_mat
                 
-                # Get other values
                 thickness = row.iloc[t_col]
                 width = row.iloc[width_col]
                 length = row.iloc[len_col]
@@ -430,7 +373,6 @@ class YihengPlateStrategy(ExtractionStrategy):
                 price = row.iloc[price_col]
                 unit_wt = row.iloc[unit_wt_col] if unit_wt_col < len(df.columns) else None
                 
-                # Validate Price
                 if pd.isna(price) or str(price).strip() == '': continue
                 try:
                     p_val = float(price)
@@ -439,7 +381,6 @@ class YihengPlateStrategy(ExtractionStrategy):
                 
                 if not final_mat: continue
                 
-                # Format
                 t_str = format_thickness(str(thickness)) if pd.notna(thickness) else ""
                 w_str = str(width).strip() if pd.notna(width) else ""
                 l_str = str(length).strip() if pd.notna(length) else ""
@@ -465,4 +406,125 @@ class YihengPlateStrategy(ExtractionStrategy):
                     '理计价格': 0
                 })
                 
+        return records, column_headers
+
+class FuShunDeStrategy(ExtractionStrategy):
+    """Strategy for FuShunDe format (Inventory | Spec | ... | Price)"""
+    
+    def match(self, df: pd.DataFrame) -> Tuple[bool, int, int]:
+        for i in range(min(20, len(df))):
+            row_str = df.iloc[i].astype(str).str.cat(sep=' ')
+            if '存货' in row_str and '规格型号' in row_str and '销售报价' in row_str:
+                return True, i, i + 1
+        return False, -1, -1
+
+    def extract(self, df: pd.DataFrame, header_row: int, data_start_row: int) -> Tuple[List[Dict], List[str]]:
+        records = []
+        column_headers = self.get_column_headers(df, header_row)
+        
+        try:
+            headers = df.iloc[header_row].astype(str).tolist()
+            prod_col = -1
+            spec_col = -1
+            price_col = -1
+            
+            for idx, h in enumerate(headers):
+                if '存货' in h: prod_col = idx
+                elif '规格型号' in h: spec_col = idx
+                elif '销售报价' in h: price_col = idx
+            
+            if prod_col == -1 or spec_col == -1 or price_col == -1:
+                return [], []
+        except:
+            return [], []
+
+        last_product = ""
+
+        for row_idx in range(data_start_row, len(df)):
+            row = df.iloc[row_idx]
+            if row.dropna(how='all').empty: continue
+            
+            raw_prod = str(row.iloc[prod_col]).strip()
+            if raw_prod and raw_prod != 'nan':
+                last_product = raw_prod
+            
+            current_prod = last_product
+            if not current_prod: continue
+            
+            brand_from_prod = ""
+            clean_prod_name = current_prod
+            if "宝得" in current_prod:
+                brand_from_prod = "宝得"
+                clean_prod_name = current_prod.replace("宝得", "").strip()
+            
+            raw_spec = str(row.iloc[spec_col]).strip()
+            if not raw_spec or raw_spec == 'nan': continue
+            
+            raw_price = row.iloc[price_col]
+            price_val = 0
+            try:
+                price_val = float(raw_price)
+            except:
+                continue
+
+            if pd.isna(price_val) or (isinstance(price_val, float) and np.isnan(price_val)):
+                continue
+                
+            spec_brand = ""
+            location = ""
+            clean_spec = raw_spec.replace(" ", "")
+            
+            if "宝得" in clean_spec:
+                spec_brand = "宝得"
+                clean_spec = clean_spec.replace("宝得", "")
+            
+            clean_spec = clean_spec.replace("散", "")
+            
+            import re
+            chinese_chars = re.findall(r'[\u4e00-\u9fa5]+', clean_spec)
+            for ch in chinese_chars:
+                if "锰" in ch:
+                    pass
+                else:
+                    location = ch
+                    clean_spec = clean_spec.replace(ch, "")
+            
+            clean_spec = clean_spec.strip()
+            
+            
+            final_brand = spec_brand if spec_brand else brand_from_prod
+            
+            p_type = ""
+            if any(x in clean_prod_name for x in ['槽钢', '角钢', '工字钢', 'H型钢', '型钢']):
+                p_type = '型材'
+            elif any(x in clean_prod_name for x in ['板', '卷']):
+                p_type = '板材'
+            elif any(x in clean_prod_name for x in ['方管', '矩管']):
+                p_type = '方矩管'
+            elif any(x in clean_prod_name for x in ['管']):
+                p_type = '管材'
+            elif any(x in clean_prod_name for x in ['圆钢', '螺纹']):
+                p_type = '棒材'
+            
+            thickness_val = ""
+            if '*' in clean_spec:
+                 parts = clean_spec.split('*')
+                 if parts:
+                    last_part = parts[-1].strip()
+                    if re.match(r'^\d+(\.\d+)?$', last_part):
+                        thickness_val = last_part
+
+            records.append({
+                '类型': p_type,
+                '品名': clean_prod_name,
+                '规格': clean_spec,
+                '厚度': thickness_val,
+                '价格': int(price_val),
+                '品牌/厂家': final_brand,
+                '提货地/市': location,
+                '默认价格': int(price_val),
+                '过磅价格': int(price_val),
+                '理计价格': 0
+            })
+            
         return records, column_headers

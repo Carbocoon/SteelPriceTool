@@ -5,13 +5,14 @@ import streamlit as st
 from io import BytesIO
 from typing import Dict, List, Tuple, Optional, Any
 from .utils import normalize_length
-from .strategies import ZhengdaGalvanizedStrategy, FourColumnStrategy, ThreeColumnStrategy, HengwangPipeStrategy, YihengPlateStrategy
+from .strategies import ZhengdaGalvanizedStrategy, FourColumnStrategy, ThreeColumnStrategy, HengwangPipeStrategy, YihengPlateStrategy, FuShunDeStrategy
 
 class ProductDataProcessor:
     """产品数据处理核心类 - 动态识别版本"""
     
     def __init__(self):
         self.strategies = [
+            FuShunDeStrategy(),
             YihengPlateStrategy(),
             HengwangPipeStrategy(),
             ZhengdaGalvanizedStrategy(),
@@ -184,15 +185,17 @@ class ProductDataProcessor:
         if not specs_data:
             return spec_analysis
         
-        # 分析第一个规格
-        first_spec = specs_data[0]['规格']
-        
-        # 检查是否是"长*宽"格式
-        if '*' in first_spec:
+        # 分析第一个规格（使用安全取值，兼容不同策略输出）
+        first_item = specs_data[0] if isinstance(specs_data, list) and len(specs_data) > 0 else {}
+        # 规格优先级：'规格' -> '规格1' -> ''
+        first_spec = str(first_item.get('规格') or first_item.get('规格1') or '')
+
+        # 如果规格存在且为长*宽格式，则记录维度模式
+        if first_spec and '*' in first_spec:
             spec_analysis['dimension_pattern'] = '长*宽'
             # 对于方矩管，规格1通常是壁厚
             spec_analysis['spec1_type'] = '壁厚'
-            
+
             # 尝试从规格字符串提取长宽
             match = re.match(r'(\d+)\s*\*\s*(\d+)', first_spec)
             if match:
@@ -200,15 +203,30 @@ class ProductDataProcessor:
                 spec_analysis['spec2_type'] = f'长{length}*宽{width}'
             else:
                 spec_analysis['spec2_type'] = '尺寸'
-        
-        # 检查厚度是否包含范围
-        first_thickness = specs_data[0]['厚度']
-        if '-' in first_thickness:
-            spec_analysis['spec1_type'] = '厚度范围'
-        elif 'mm' in first_thickness or '毫米' in first_thickness:
-            spec_analysis['spec1_type'] = '厚度'
+
+        # 检查厚度字段（兼容不同策略的键名）
+        first_thickness = ''
+        if '厚度' in first_item and first_item.get('厚度') is not None:
+            first_thickness = str(first_item.get('厚度'))
+        elif first_item.get('规格1') is not None:
+            first_thickness = str(first_item.get('规格1'))
         else:
-            spec_analysis['spec1_type'] = '厚度'
+            # 作为兜底，尝试从'规格'中提取可能的厚度（如以数字为主的单个值）
+            if first_spec:
+                nums = re.findall(r'(\d+(?:\.\d+)?)', first_spec)
+                if nums:
+                    first_thickness = nums[0]
+
+        if first_thickness:
+            if '-' in first_thickness:
+                spec_analysis['spec1_type'] = '厚度范围'
+            elif 'mm' in first_thickness or '毫米' in first_thickness:
+                spec_analysis['spec1_type'] = '厚度'
+            else:
+                spec_analysis['spec1_type'] = '厚度'
+        else:
+            # 如果完全无法判断，则保留空或默认为'厚度'
+            spec_analysis['spec1_type'] = spec_analysis.get('spec1_type') or '厚度'
         
         return spec_analysis
     
@@ -221,9 +239,9 @@ class ProductDataProcessor:
         template_records = []
         
         for item in source_data:
-            spec_str = item['规格']
-            thickness = item['厚度']
-            price = item['价格']
+            spec_str = item.get('规格', '')
+            thickness = item.get('厚度', '')
+            price = item.get('价格', 0)
             
             # 解析规格字符串，提取可能的尺寸信息
             dimension_match = re.match(r'(\d+)\s*\*\s*(\d+)', spec_str)
@@ -427,8 +445,6 @@ class ProductDataProcessor:
         if not spec1_str:
             return 0.0
         try:
-            # Handle ranges like "2.0-2.5", take the first one
-            # Also handle "3.0" or 3.0
             s = str(spec1_str).strip()
             first_part = re.split(r'[-－]', s)[0].strip()
             return float(first_part)
@@ -469,7 +485,6 @@ class ProductDataProcessor:
         
         # 第五步：排序
         if not template_df.empty and '型号' in template_df.columns:
-            # 1. Generate Product Name Rank (Appearance Order)
             if '品名' in template_df.columns:
                 product_ranks = {}
                 next_p_rank = 0
@@ -485,7 +500,6 @@ class ProductDataProcessor:
             else:
                 template_df['p_rank'] = 0
 
-            # 2. Generate Model Rank (Appearance Order)
             model_ranks = {}
             next_m_rank = 0
             m_rank_list = []
@@ -498,17 +512,12 @@ class ProductDataProcessor:
                 m_rank_list.append(model_ranks[model_key])
             template_df['m_rank'] = m_rank_list
             
-            # 3. Generate Spec1 Value
             template_df['s1_val'] = template_df['规格1'].apply(self._get_spec1_value)
             
-            # Sort
-            # Sort by Product Rank (group products), then Model Rank (original order), then Spec1 (thickness)
             template_df.sort_values(by=['p_rank', 'm_rank', 's1_val'], inplace=True)
             
-            # Drop helper columns
             template_df.drop(columns=['p_rank', 'm_rank', 's1_val'], inplace=True)
             
-            # Debug info
             if st.session_state.get('debug_mode', False):
                 st.write("排序完成。前5行数据:")
                 st.write(template_df[['品名', '型号', '规格1']].head())
